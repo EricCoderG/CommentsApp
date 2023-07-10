@@ -3,9 +3,11 @@ package com.dp.controller;
 
 import com.dp.dto.LoginFormDTO;
 import com.dp.dto.Result;
+import com.dp.dto.UserDTO;
 import com.dp.entity.UserInfo;
 import com.dp.service.IUserInfoService;
 import com.dp.service.IUserService;
+import com.dp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
@@ -52,8 +54,8 @@ public class UserController {
 
     @GetMapping("/me")
     public Result me(){
-        // TODO 获取当前登录的用户并返回
-        return Result.fail("功能未完成");
+        UserDTO user = UserHolder.getUser();
+        return Result.ok(user);
     }
 
     @GetMapping("/info/{id}")
