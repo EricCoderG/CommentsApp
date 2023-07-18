@@ -48,8 +48,7 @@ public class UserController {
      */
     @PostMapping("/logout")
     public Result logout(){
-        UserHolder.removeUser();
-        return Result.ok();
+        return userService.logout();
     }
 
     @GetMapping("/me")
