@@ -31,11 +31,10 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
         // 互斥锁缓存击穿
         Shop shop = queryWithMutex(id);
+        if (shop == null) {
+            return Result.fail("商铺不存在!");
+        }
         return Result.ok(shop);
-    }
-
-    private Shop queryWithMutex(Long id) {
-        return null;
     }
 
     @Override
@@ -74,6 +73,49 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         }
         // 将数据写入Redis, 设置过期时间
         stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        return shop;
+    }
+
+    private Shop queryWithMutex(Long id) {
+        // 从Redis中获取商铺信息
+        String key = CACHE_SHOP_KEY + id;
+        String shopJson = stringRedisTemplate.opsForValue().get(key);
+        if (StrUtil.isNotBlank(shopJson)) {
+            // 如果Redis中有数据，直接返回
+            Shop shop = JSONUtil.toBean(shopJson, Shop.class);
+            return shop;
+        }
+        //判断命中的是空值
+        if (shopJson != null) {
+            return null;
+        }
+        String lockKey = null;
+        Shop shop = null;
+        try {
+            // 实现缓存重建
+            lockKey = LOCK_SHOP_KEY + id;
+            boolean isLock = tryLock(lockKey);
+            if (!isLock) {
+                // 如果没有获取到锁，休眠一段时间后重试
+                Thread.sleep(50);
+                return queryWithMutex(id);
+            }
+            // 缓存重建成功，从数据库中查询
+            shop = getById(id);
+            if (shop == null) {
+                // 将空值写入Redis, 设置过期时间
+                stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+                return null;
+            }
+            // 将数据写入Redis, 设置过期时间
+            stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } finally {
+            // 释放锁
+            unlock(lockKey);
+        }
+
         return shop;
     }
 
