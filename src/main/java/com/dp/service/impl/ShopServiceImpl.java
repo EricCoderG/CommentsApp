@@ -1,5 +1,6 @@
 package com.dp.service.impl;
 
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.dp.dto.Result;
@@ -25,27 +26,16 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Result queryById(Long id) {
-        // 从Redis中获取商铺信息
-        String shopJson = stringRedisTemplate.opsForValue().get(CACHE_SHOP_KEY + id);
-        if (StrUtil.isNotBlank(shopJson)) {
-            // 如果Redis中有数据，直接返回
-            Shop shop = JSONUtil.toBean(shopJson, Shop.class);
-            return Result.ok(shop);
-        }
-        //判断命中的是空值
-        if (shopJson != null) {
-            return Result.fail("商铺不存在!");
-        }
-        // 如果Redis中没有数据，从数据库中查询
-        Shop shop = getById(id);
-        if (shop == null) {
-            // 将空值写入Redis, 设置过期时间
-            stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
-            return Result.fail("商铺不存在!");
-        }
-        // 将数据写入Redis, 设置过期时间
-        stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        // 缓存穿透
+        // Shop shop = queryWithPassThrough(id);
+
+        // 互斥锁缓存击穿
+        Shop shop = queryWithMutex(id);
         return Result.ok(shop);
+    }
+
+    private Shop queryWithMutex(Long id) {
+        return null;
     }
 
     @Override
@@ -61,4 +51,41 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
         return Result.ok();
     }
+
+    public Shop queryWithPassThrough(Long id) {
+        // 从Redis中获取商铺信息
+        String key = CACHE_SHOP_KEY + id;
+        String shopJson = stringRedisTemplate.opsForValue().get(key);
+        if (StrUtil.isNotBlank(shopJson)) {
+            // 如果Redis中有数据，直接返回
+            Shop shop = JSONUtil.toBean(shopJson, Shop.class);
+            return shop;
+        }
+        //判断命中的是空值
+        if (shopJson != null) {
+            return null;
+        }
+        // 如果Redis中没有数据，从数据库中查询
+        Shop shop = getById(id);
+        if (shop == null) {
+            // 将空值写入Redis, 设置过期时间
+            stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+            return null;
+        }
+        // 将数据写入Redis, 设置过期时间
+        stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        return shop;
+    }
+
+    private boolean tryLock(String key){
+        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", LOCK_SHOP_TTL, TimeUnit.SECONDS);
+        // 如果为空会发生拆箱空指针异常
+        return BooleanUtil.isTrue(flag);
+    }
+
+    private void unlock(String key){
+        stringRedisTemplate.delete(key);
+    }
+
+
 }
