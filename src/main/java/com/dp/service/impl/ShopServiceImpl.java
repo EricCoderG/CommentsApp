@@ -9,6 +9,7 @@ import com.dp.entity.Shop;
 import com.dp.mapper.ShopMapper;
 import com.dp.service.IShopService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.dp.utils.CacheClient;
 import com.dp.utils.RedisData;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -30,17 +31,20 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Resource
     StringRedisTemplate stringRedisTemplate;
 
+    @Resource
+    CacheClient cacheClient;
+
     private static final ExecutorService CACHE_REBUILD_EXECYTOR = Executors.newFixedThreadPool(10);
 
     @Override
     public Result queryById(Long id) {
         // 缓存穿透
-        // Shop shop = queryWithPassThrough(id);
+        //Shop shop = cacheClient.queryWithPassThrough(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
         // 逻辑过期
-        // Shop shop = queryWithLogicalExpire(id);
+        Shop shop = cacheClient.queryWithLogicalExpire(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
         // 互斥锁缓存击穿
-        Shop shop = queryWithMutex(id);
+        //Shop shop = queryWithMutex(id);
         if (shop == null) {
             return Result.fail("商铺不存在!");
         }
@@ -59,62 +63,6 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         stringRedisTemplate.delete(CACHE_SHOP_KEY + shop.getId());
 
         return Result.ok();
-    }
-
-    public Shop queryWithPassThrough(Long id) {
-        // 从Redis中获取商铺信息
-        String key = CACHE_SHOP_KEY + id;
-        String shopJson = stringRedisTemplate.opsForValue().get(key);
-        if (StrUtil.isNotBlank(shopJson)) {
-            // 如果Redis中有数据，直接返回
-            Shop shop = JSONUtil.toBean(shopJson, Shop.class);
-            return shop;
-        }
-        //判断命中的是空值
-        if (shopJson != null) {
-            return null;
-        }
-        // 如果Redis中没有数据，从数据库中查询
-        Shop shop = getById(id);
-        if (shop == null) {
-            // 将空值写入Redis, 设置过期时间
-            stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
-            return null;
-        }
-        // 将数据写入Redis, 设置过期时间
-        stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
-        return shop;
-    }
-
-    private Shop queryWithLogicalExpire(Long id) {
-        // 从Redis中获取商铺信息
-        String key = CACHE_SHOP_KEY + id;
-        String shopJson = stringRedisTemplate.opsForValue().get(key);
-        if (StrUtil.isBlank(shopJson)) {
-            return null;
-        }
-        // 命中，需要先把json反序列化为对象
-        RedisData redisData = JSONUtil.toBean(shopJson, RedisData.class);
-        JSONObject data = (JSONObject) redisData.getData();
-        Shop shop = JSONUtil.toBean(data, Shop.class);
-        LocalDateTime expireTime = redisData.getExpireTime();
-        // 判断是否过期
-        if (expireTime.isAfter(LocalDateTime.now())) {
-            return shop;
-        }
-        // 已过期，需要缓存重建
-        // 获取互斥锁
-        String lockKey = LOCK_SHOP_KEY + id;
-        boolean isLock = tryLock(lockKey);
-        if (isLock) {
-            CACHE_REBUILD_EXECYTOR.submit(() -> {
-                // 重建缓存
-                this.saveShopToRedis(id, 1800L);
-                // 释放锁
-                unlock(lockKey);
-            });
-        }
-        return shop;
     }
 
     private Shop queryWithMutex(Long id) {
@@ -168,15 +116,6 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     private void unlock(String key){
         stringRedisTemplate.delete(key);
-    }
-
-    private void saveShopToRedis(Long id, Long seconds) {
-        Shop shop = getById(id);
-        RedisData redisData = new RedisData();
-        redisData.setData(shop);
-        redisData.setExpireTime(LocalDateTime.now().plusSeconds(seconds));
-
-        stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(redisData));
     }
 
 }
