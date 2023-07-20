@@ -8,8 +8,10 @@ import com.dp.service.ISeckillVoucherService;
 import com.dp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.dp.utils.RedisIdWorker;
+import com.dp.utils.SimpleRedisLock;
 import com.dp.utils.UserHolder;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +27,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     RedisIdWorker redisIdWorker;
+
+    @Resource
+    StringRedisTemplate stringRedisTemplate;
 
     @Override
     public Result seckillVoucher(Long voucherId) {
@@ -43,12 +48,22 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.fail("库存不足");
         }
         Long userId = UserHolder.getUser().getId();
-        // 粒度控制到用户级别,并且保证事务在锁被释放的时候已经被提交
-        synchronized (userId.toString().intern()) { // 只要是值相同的对象，都会共用同一把锁
+        //创建锁对象
+        SimpleRedisLock lock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
+        //获取锁
+        boolean isLock = lock.tryLock(5);
+
+        if (!isLock) {
+            return Result.fail("不允许重复下单");
+        }
+        try {
             // 通过代理调用同一个类中的方法，事务是不会生效的，因为代理类是通过反射调用的
             // 所以需要通过AopContext.currentProxy()获取代理对象，然后调用代理对象的方法
             IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
             return proxy.createVoucherOrder(voucherId);
+        } finally {
+            //释放锁
+            lock.unlock();
         }
     }
 
