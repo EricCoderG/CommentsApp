@@ -76,18 +76,21 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                         continue;
                     }
                     // 解析数据
-                    MapRecord<String, Object, Object> record = list.get(0);
-                    Map<Object, Object> value = record.getValue();
-                    VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(value, new VoucherOrder(), true);
-                    // 3.创建订单
-                    createVoucherOrder(voucherOrder);
-                    // 4.确认消息 XACK
-                    stringRedisTemplate.opsForStream().acknowledge("s1", "g1", record.getId());
+                    handleOrder(list.get(0));
                 } catch (Exception e) {
                     log.error("处理订单异常", e);
                     handlePendingList();
                 }
             }
+        }
+
+        private void handleOrder(MapRecord<String, Object, Object> record) {
+            Map<Object, Object> value = record.getValue();
+            VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(value, new VoucherOrder(), true);
+            // 3.创建订单
+            createVoucherOrder(voucherOrder);
+            // 4.确认消息 XACK
+            stringRedisTemplate.opsForStream().acknowledge("s1", "g1", record.getId());
         }
 
         private void handlePendingList() {
@@ -105,13 +108,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                         break;
                     }
                     // 解析数据
-                    MapRecord<String, Object, Object> record = list.get(0);
-                    Map<Object, Object> value = record.getValue();
-                    VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(value, new VoucherOrder(), true);
-                    // 3.创建订单
-                    createVoucherOrder(voucherOrder);
-                    // 4.确认消息 XACK
-                    stringRedisTemplate.opsForStream().acknowledge("s1", "g1", record.getId());
+                    handleOrder(list.get(0));
                 } catch (Exception e) {
                     log.error("处理订单异常", e);
                 }
