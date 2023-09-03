@@ -28,4 +28,5 @@
 ### 后端
 
 修改application.yaml,配置MySQL数据库和Redis数据库。其中MySQL数据库提供了初始化脚本，位于/src/main/resources/db目录下。
+需要在Redis-cli中运行如下命令  `XGROUP CREATE stream.orders g1 0 MKSTREAM`
 
